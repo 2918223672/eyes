@@ -1,0 +1,46 @@
+# Build directories
+build/
+install/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.so.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+log/
+logs/
+*.log
+
+# Binary executables (add if you want to exclude them; remove if you want to track them)
+# build/zero
+# build/sentry
+# build/*_test
+
+# Core dumps
+core
+core.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/

@@ -1,0 +1,9 @@
+threshold: 180
+max_angle_error: 15
+min_lightbar_ratio: 3.0
+max_lightbar_ratio: 15.0
+min_lightbar_length: 8
+min_armor_ratio: 1.5
+max_armor_ratio: 5.0
+max_side_ratio: 2.0
+max_rectangular_error: 15
