@@ -157,7 +157,7 @@ int main(int argc, char * argv[])
                           cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
 
     }
-
+//诉讼诉讼rewf
     if (!display) continue;
     cv::Mat display_img;
     cv::resize(img, display_img, cv::Size(640, 480));
