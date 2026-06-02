@@ -1,0 +1,83 @@
+enemy_color: "blue"
+
+#####-----检测器参数-----#####
+threshold: 180
+max_angle_error: 15
+min_lightbar_ratio: 3.0
+max_lightbar_ratio: 15.0
+min_lightbar_length: 8
+min_armor_ratio: 1.5
+max_armor_ratio: 5.0
+max_side_ratio: 2.0
+max_rectangular_error: 15
+
+#####-----神经网络参数-----#####
+yolo_name: yolov5
+classify_model: assets/tiny_resnet.onnx
+yolo11_model_path: assets/yolo11.xml
+yolov8_model_path: assets/yolov8.xml
+yolov5_model_path: assets/yolov5.xml
+device: CPU
+min_confidence: 0.8
+use_traditional: true
+
+#####-----ROI-----#####
+roi:
+  x: 420
+  y: 50
+  width: 600
+  height: 600
+
+use_roi: false
+
+#####-----相机参数-----#####
+camera_name: "hikrobot"
+exposure_ms: 3.0
+gain: 16.9
+vid_pid: "2bdf:0001"
+
+#####-----USB相机参数-----#####
+image_width: 1280
+image_height: 720
+usb_exposure: 156
+usb_frame_rate: 30
+usb_gamma: 100
+usb_gain: 10
+
+#####-----全景感知参数-----#####
+fov_h: 57.7
+fov_v: 56.7
+new_fov_h: 27
+new_fov_v: 40.9
+mode: 1
+
+#####-----标定参数-----#####
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+camera_matrix: [2471.7042207556383, 0, 628.41554289522833, 0, 2496.6212069725448, 548.65184574727596, 0, 0, 1]
+distort_coeffs: [-0.1206891596296123, 0.62989064176675036, 0.0042871080957956357, -0.00049692884030847102, 0]
+
+R_camera2gimbal: [0.01928451708725664, 0.00012696140743255463, 0.99981402834802846, -0.99981344688553653, -0.0010834913551969569, 0.019284643459122196, 0.0010857382619952124, -0.99999940496346484, 0.00010604311483339372]
+t_camera2gimbal: [0.13089617453251859, 0.0038468007459533785, 0.094139945222010288]
+
+#####-----tracker参数-----#####
+min_detect_count: 5
+max_temp_lost_count: 25
+outpost_max_temp_lost_count: 75
+
+#####-----aimer参数-----#####
+yaw_offset: -0.8
+pitch_offset: -1
+comming_angle: 60
+leaving_angle: 20
+left_yaw_offset: -1
+right_yaw_offset: -0.6
+decision_speed: 10
+high_speed_delay_time: 0.026
+low_speed_delay_time: 0.010
+
+#####-----shooter参数-----#####
+first_tolerance: 5
+second_tolerance: 2
+judge_distance: 3
+auto_fire: true
