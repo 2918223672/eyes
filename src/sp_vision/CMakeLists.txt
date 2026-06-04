@@ -32,13 +32,12 @@ include_directories(${PROJECT_SOURCE_DIR})
 add_subdirectory(tools)              # 公共工具（数学、日志、控制、线程池）
 add_subdirectory(io)                 # 硬件驱动（相机、云台、CAN、IMU、ROS2 通信）
 add_subdirectory(tasks/auto_aim)     # 自瞄算法（检测、跟踪、解算、瞄准、MPC）
-add_subdirectory(tasks/omniperception)# 全景感知（多相机 YOLO + 决策融合）
 
 # ===== [4. 可执行目标] 生产程序 + 测试程序 =====
 
 # --- 生产可执行文件 ---
 add_executable(sentry src/sentry.cpp)
-target_link_libraries(sentry tools io auto_aim omniperception)
+target_link_libraries(sentry tools io auto_aim)
 
 add_executable(zero src/zero.cpp)
 target_link_libraries(zero tools io auto_aim)

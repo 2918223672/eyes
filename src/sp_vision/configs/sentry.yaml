@@ -32,7 +32,7 @@ use_roi: false
 
 #####-----相机参数-----#####
 camera_name: "hikrobot"
-exposure_ms: 3.0
+exposure_ms: 2.5
 gain: 16.9
 vid_pid: "2bdf:0001"
 

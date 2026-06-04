@@ -1,7 +1,7 @@
 /**
- * @brief 哨兵自瞄 — 全景感知版 + 调试画面
+ * @brief 哨兵自瞄 + 调试画面
  *
- * 硬件：1×海康工业相机（主视角）+ 2×USB 相机（侧方搜索）
+ * 硬件：1×海康工业相机（主视角）
  * 调试画面：YOLO 检测框（绿）/ EKF 重投影（绿点）/ 瞄准点（红=有效，蓝=无效）
  */
 
@@ -10,15 +10,15 @@
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 
+#include <yaml-cpp/yaml.h>
+
 #include "io/camera.hpp"
 #include "io/my_comm_manager.hpp"
-#include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
-#include "tasks/omniperception/decider.hpp"
 #include "tools/utils/exiter.hpp"
 #include "tools/utils/img_tools.hpp"
 #include "tools/utils/logger.hpp"
@@ -45,8 +45,6 @@ int main(int argc, char * argv[])
 
   // ===== 硬件初始化 =====
   io::Camera camera(config_path);
-  io::USBCamera usbcam1("video0", config_path);
-  io::USBCamera usbcam2("video2", config_path);
   io::CommManager comm("/dev/ttyUSB0", 115200);
 
   // ===== 算法模块初始化 =====
@@ -55,7 +53,11 @@ int main(int argc, char * argv[])
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
   auto_aim::Shooter shooter(config_path);
-  omniperception::Decider decider(config_path);
+
+  // 读取敌方颜色，用于装甲板过滤
+  auto yaml = YAML::LoadFile(config_path);
+  auto enemy_color =
+    (yaml["enemy_color"].as<std::string>() == "red") ? auto_aim::Color::red : auto_aim::Color::blue;
 
   cv::Mat img;
   std::chrono::steady_clock::time_point timestamp;
@@ -79,18 +81,28 @@ int main(int argc, char * argv[])
 
     // 3. 检测 + 过滤 + 排序
     auto armors = yolo.detect(img);
-    decider.armor_filter(armors);
-    decider.set_priority(armors);
+
+    // 过滤：敌方颜色 + 排除前哨站和5号
+    armors.remove_if(
+      [&](const auto_aim::Armor & a) { return a.color != enemy_color; });
+    armors.remove_if(
+      [&](const auto_aim::Armor & a) { return a.name == auto_aim::ArmorName::outpost; });
+    armors.remove_if(
+      [&](const auto_aim::Armor & a) { return a.name == auto_aim::ArmorName::five; });
+
+    // 按到图像中心的距离排序
+    armors.sort([](const auto_aim::Armor & a, const auto_aim::Armor & b) {
+      cv::Point2f img_center(1440 / 2, 1080 / 2);
+      return cv::norm(a.center - img_center) < cv::norm(b.center - img_center);
+    });
 
     // 4. 多目标跟踪
     auto targets = tracker.track(armors, timestamp);
 
-    // 5. 全景感知决策
+    // 5. 瞄准决策
     io::Command command{false, false, 0, 0};
 
-    if (tracker.state() == "lost") {
-      command = decider.decide(yolo, gimbal_pos, usbcam1, usbcam2, camera);
-    } else {
+    if (tracker.state() != "lost") {
       command = aimer.aim(targets, timestamp, 22);
     }
 
