@@ -64,6 +64,7 @@ int main(int argc, char * argv[])
   });
 
   auto last_t = std::chrono::steady_clock::now();
+  Eigen::Vector3d gimbal_ypr_rad = Eigen::Vector3d::Zero();
 
   // ===== 主循环：处理推理结果 =====
   while (!exiter.exit()) {
@@ -74,15 +75,15 @@ int main(int argc, char * argv[])
     last_t = t;
 
     // 2. 读 C板 回传姿态 [yaw, pitch, roll]
-    io::SeaskyRx rx;
-    Eigen::Vector3d gimbal_pos(0, 0, 0);
+    io::SeaskyRx rx{};
     if (comm.receive(rx)) {
-      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
+      auto ypr = io::ypr_rad(rx);
+      gimbal_ypr_rad = Eigen::Vector3d(ypr[0], ypr[1], ypr[2]);
     }
     Eigen::Quaterniond q =
-      Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
-      Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
-      Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
+      Eigen::AngleAxisd(gimbal_ypr_rad[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[2], Eigen::Vector3d::UnitX());
     solver.set_R_gimbal2world(q);
 
     // 3. 多目标跟踪 + 瞄准
@@ -94,7 +95,7 @@ int main(int argc, char * argv[])
     }
 
     // 4. 射击许可
-    command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
+    command.shoot = shooter.shoot(command, aimer, targets, gimbal_ypr_rad);
 
     // 5. 打包 flags + 误差角发送（误差角 = 目标角 − 当前云台角）
     io::FireMode fire_mode = io::FireMode::NO_FIRE;
@@ -103,8 +104,9 @@ int main(int argc, char * argv[])
     if (tracker.state() == "tracking") target_state = io::TargetState::READY_TO_FIRE;
     else if (tracker.state() == "deciding") target_state = io::TargetState::TARGET_CONVERGING;
     uint16_t flags = io::pack_tx_flags(fire_mode, target_state, io::TargetType::NONE);
-    float error_pitch = static_cast<float>(command.pitch - gimbal_pos[1]);
-    float error_yaw = static_cast<float>(command.yaw - gimbal_pos[0]);
+    float error_pitch = static_cast<float>(command.pitch - gimbal_ypr_rad[1]);
+    float error_yaw = static_cast<float>(
+      tools::limit_rad(command.yaw - gimbal_ypr_rad[0]));
     comm.send(flags, error_pitch, error_yaw);
 
     // ===== 调试显示 =====

@@ -36,17 +36,18 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point timestamp;
 
   io::CommManager comm("/dev/ttyUSB0", 921600);
+  Eigen::Vector3d gimbal_ypr_rad = Eigen::Vector3d::Zero();
 
   while (!exiter.exit()) {
-    io::SeaskyRx rx;
-    Eigen::Vector3d gimbal_pos(0, 0, 0);  // [yaw, pitch, roll]
+    io::SeaskyRx rx{};
     if (comm.receive(rx)) {
-      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
+      auto ypr = io::ypr_rad(rx);
+      gimbal_ypr_rad = Eigen::Vector3d(ypr[0], ypr[1], ypr[2]);
     }
     Eigen::Quaterniond q =
-      Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
-      Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
-      Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
+      Eigen::AngleAxisd(gimbal_ypr_rad[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[2], Eigen::Vector3d::UnitX());
     solver.set_R_gimbal2world(q);
 
     camera.read(img, timestamp);
@@ -56,14 +57,15 @@ int main(int argc, char * argv[])
       auto & armor = armors.front();
       solver.solve(armor);
 
-      double yaw = armor.ypr_in_world[0] * 180.0 / CV_PI;
-      double pitch = armor.ypr_in_world[1] * 180.0 / CV_PI;
+      double yaw = armor.ypr_in_world[0];
+      double pitch = armor.ypr_in_world[1];
       double real_dist = armor.ypd_in_world[2];
       bool should_shoot = (real_dist < 0.5);
       io::FireMode fire_mode = should_shoot ? io::FireMode::AUTO_FIRE : io::FireMode::AUTO_AIM;
       uint16_t flags = io::pack_tx_flags(fire_mode, io::TargetState::READY_TO_FIRE, io::TargetType::NONE);
-      float error_pitch = static_cast<float>(pitch - gimbal_pos[1]);
-      float error_yaw = static_cast<float>(yaw - gimbal_pos[0]);
+      float error_pitch = static_cast<float>(pitch - gimbal_ypr_rad[1]);
+      float error_yaw = static_cast<float>(
+        tools::limit_rad(yaw - gimbal_ypr_rad[0]));
       comm.send(flags, error_pitch, error_yaw);
     } else {
       uint16_t flags = io::pack_tx_flags(io::FireMode::NO_FIRE, io::TargetState::NO_TARGET, io::TargetType::NONE);

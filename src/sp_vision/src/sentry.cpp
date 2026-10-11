@@ -66,6 +66,7 @@ int main(int argc, char * argv[])
   cv::Mat img;
   std::chrono::steady_clock::time_point timestamp;
   auto last_t = std::chrono::steady_clock::now();
+  Eigen::Vector3d gimbal_ypr_rad = Eigen::Vector3d::Zero();
 
   rclcpp::init(argc, argv);
     auto node = std::make_shared<rclcpp::Node>("sentry_debug_node");
@@ -83,24 +84,24 @@ int main(int argc, char * argv[])
 
     // 2. 读 C板 回传姿态（回环测试时 yaw/pitch 是回显；真实接入后是云台 IMU 角）
     io::SeaskyRx rx{};
-    Eigen::Vector3d gimbal_pos(0, 0, 0);  // [yaw, pitch, roll]
     if (comm.receive(rx)) {
-      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
+      auto ypr = io::ypr_rad(rx);
+      gimbal_ypr_rad = Eigen::Vector3d(ypr[0], ypr[1], ypr[2]);
     }
 
     geometry_msgs::msg::Vector3 debug_msg;
-    debug_msg.x = rx.pitch;  // 对应 x 轴数据
-    debug_msg.y = rx.yaw;    // 对应 y 轴数据
-    debug_msg.z = 0.0;                 // 可填弹速或其它数据
+    debug_msg.x = gimbal_ypr_rad[1];  // pitch，rad
+    debug_msg.y = gimbal_ypr_rad[0];  // yaw，rad
+    debug_msg.z = gimbal_ypr_rad[2];  // roll，rad
     debug_pub->publish(debug_msg);
     rclcpp::spin_some(node);
 
 
     // 由欧拉角重建云台旋转（ZYX 约定，需与 C板 IMU 姿态定义对齐）
     Eigen::Quaterniond q =
-      Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
-      Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
-      Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
+      Eigen::AngleAxisd(gimbal_ypr_rad[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[2], Eigen::Vector3d::UnitX());
     solver.set_R_gimbal2world(q);
 
     // 3. 检测 + 过滤 + 排序
@@ -142,7 +143,7 @@ int main(int argc, char * argv[])
     }
 
     // 6. 射击许可
-    command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
+    command.shoot = shooter.shoot(command, aimer, targets, gimbal_ypr_rad);
 
     // 7. 打包 flags + 误差角发送（误差角 = 目标角 − 当前云台角）
     io::FireMode fire_mode = io::FireMode::NO_FIRE;
@@ -156,8 +157,9 @@ int main(int argc, char * argv[])
     io::TargetType target_type = io::TargetType::NONE;
 
     uint16_t flags = io::pack_tx_flags(fire_mode, target_state, target_type);
-    float error_pitch = static_cast<float>(command.pitch - gimbal_pos[1]);
-    float error_yaw = static_cast<float>(command.yaw - gimbal_pos[0]);
+    float error_pitch = static_cast<float>(command.pitch - gimbal_ypr_rad[1]);
+    float error_yaw = static_cast<float>(
+      tools::limit_rad(command.yaw - gimbal_ypr_rad[0]));
     comm.send(flags, error_pitch, error_yaw);
 
     // ===== 调试显示 =====

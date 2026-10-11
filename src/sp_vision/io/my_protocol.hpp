@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 
 // seasky 协议：视觉上位机 ↔ C板 串口通信（USART1，波特率 921600，8N1）
@@ -12,6 +13,8 @@ namespace io
 
 // ===== 常量 =====
 constexpr uint8_t SOF = 0xA5;
+constexpr double kDegToRad = 0.017453292519943295;
+constexpr double kRadToDeg = 57.29577951308232;
 
 // ===== 枚举（取值与 C板 master_process.h 完全一致）=====
 enum class FireMode : uint8_t { NO_FIRE = 0, AUTO_FIRE = 1, AUTO_AIM = 2 };
@@ -25,22 +28,32 @@ enum class WorkMode : uint8_t { AIM = 0, SMALL_BUFF = 1, BIG_BUFF = 2 };
 enum class BulletSpeed : uint8_t { NONE = 0, BIG_10 = 10, SMALL_15 = 15, BIG_16 = 16, SMALL_18 = 18, SMALL_30 = 30 };
 
 // ===== 帧结构 =====
-// 视觉→C板：2 个 float（先 pitch 后 yaw），均为误差角
+// 视觉→C板：2 个 float（先 pitch 后 yaw），均为误差角，单位为 rad。
 struct SeaskyTx
 {
   uint16_t flags;
-  float pitch;
-  float yaw;
+  float pitch_rad;
+  float yaw_rad;
 };
 
-// C板→视觉：3 个 float（先 yaw 后 pitch 后 roll）
+// C板→视觉：3 个 float（先 yaw 后 pitch 后 roll）。
+// 电控回传原始单位是 degree，进入视觉后必须转换成 rad。
 struct SeaskyRx
 {
   uint16_t cmd_id;
   uint16_t flags;
-  float yaw;
-  float pitch;
-  float roll;
+  float yaw_deg;
+  float pitch_deg;
+  float roll_deg;
 };
+
+inline std::array<double, 3> ypr_rad(const SeaskyRx & rx)
+{
+  return {
+    rx.yaw_deg * kDegToRad,
+    rx.pitch_deg * kDegToRad,
+    rx.roll_deg * kDegToRad
+  };
+}
 
 }  // namespace io

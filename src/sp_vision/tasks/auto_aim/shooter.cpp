@@ -29,8 +29,8 @@ bool Shooter::shoot(
                      : first_tolerance_;
 
   if (
-    std::abs(last_command_.yaw - command.yaw) < tolerance * 2 &&
-    std::abs(gimbal_pos[0] - last_command_.yaw) < tolerance &&
+    std::abs(tools::limit_rad(last_command_.yaw - command.yaw)) < tolerance * 2 &&
+    std::abs(tools::limit_rad(gimbal_pos[0] - last_command_.yaw)) < tolerance &&
     aimer.debug_aim_point.valid) {
     last_command_ = command;
     return true;

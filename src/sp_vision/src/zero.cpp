@@ -63,9 +63,9 @@ TargetPos solve_pose(const std::vector<cv::Point2f> & image_points)
   double y_g = tvec.at<double>(1) + offset_y;
   double z_g = tvec.at<double>(2) + offset_z;
 
-  double yaw = std::atan2(x_g, z_g) * 180.0 / M_PI;
+  double yaw = std::atan2(x_g, z_g);
   double horizontal_dist = std::sqrt(x_g * x_g + z_g * z_g);
-  double pitch = std::atan2(-y_g, horizontal_dist) * 180.0 / M_PI;
+  double pitch = std::atan2(-y_g, horizontal_dist);
 
   return {x_g, y_g, z_g, yaw, pitch};
 }
@@ -97,14 +97,15 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point timestamp;
 
   io::CommManager comm("/dev/ttyUSB0", 921600);
+  Eigen::Vector3d gimbal_ypr_rad = Eigen::Vector3d::Zero();
 
   while (!exiter.exit()) {
 
     // 读 C板 回传姿态 [yaw, pitch, roll]
-    io::SeaskyRx rx;
-    Eigen::Vector3d gimbal_pos(0, 0, 0);
+    io::SeaskyRx rx{};
     if (comm.receive(rx)) {
-      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
+      auto ypr = io::ypr_rad(rx);
+      gimbal_ypr_rad = Eigen::Vector3d(ypr[0], ypr[1], ypr[2]);
     }
 
     // 从相机读取一帧图像
@@ -118,8 +119,9 @@ int main(int argc, char * argv[])
       bool should_shoot = (real_dist < 0.5);
       io::FireMode fire_mode = should_shoot ? io::FireMode::AUTO_FIRE : io::FireMode::AUTO_AIM;
       uint16_t flags = io::pack_tx_flags(fire_mode, io::TargetState::READY_TO_FIRE, io::TargetType::NONE);
-      float error_pitch = static_cast<float>(res.pitch - gimbal_pos[1]);
-      float error_yaw = static_cast<float>(res.yaw - gimbal_pos[0]);
+      float error_pitch = static_cast<float>(res.pitch - gimbal_ypr_rad[1]);
+      float error_yaw = static_cast<float>(
+        tools::limit_rad(res.yaw - gimbal_ypr_rad[0]));
       comm.send(flags, error_pitch, error_yaw);
     } else {
       uint16_t flags = io::pack_tx_flags(io::FireMode::NO_FIRE, io::TargetState::NO_TARGET, io::TargetType::NONE);

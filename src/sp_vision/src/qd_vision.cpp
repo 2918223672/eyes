@@ -89,6 +89,7 @@ int main(int argc, char * argv[])
   cv::Mat img;
   std::chrono::steady_clock::time_point timestamp;
   auto last_t = std::chrono::steady_clock::now();
+  Eigen::Vector3d gimbal_ypr_rad = Eigen::Vector3d::Zero();
 
   while (!exiter.exit()) {
     camera.read(img, timestamp);
@@ -102,14 +103,17 @@ int main(int argc, char * argv[])
     }
 
     // 云台姿态
-    Eigen::Vector3d gimbal_pos(0, 0, 0);
     if (comm) {
-      io::SeaskyRx rx;
-      if (comm->receive(rx)) gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
+      io::SeaskyRx rx{};
+      if (comm->receive(rx)) {
+        auto ypr = io::ypr_rad(rx);
+        gimbal_ypr_rad = Eigen::Vector3d(ypr[0], ypr[1], ypr[2]);
+      }
     }
-    Eigen::Quaterniond q = Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
-                           Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
-                           Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
+    Eigen::Quaterniond q =
+      Eigen::AngleAxisd(gimbal_ypr_rad[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_ypr_rad[2], Eigen::Vector3d::UnitX());
     solver.set_R_gimbal2world(q);
 
     // 检测 + 过滤

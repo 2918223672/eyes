@@ -81,7 +81,8 @@ inline uint16_t pack_tx_flags(FireMode fm, TargetState ts, TargetType tt)
 }
 
 // 打包视觉→C板帧，返回 18 字节。out 需至少 18 字节
-inline size_t build_tx_frame(uint8_t * out, uint16_t flags, float pitch, float yaw)
+inline size_t build_tx_frame(
+  uint8_t * out, uint16_t flags, float pitch_rad, float yaw_rad)
 {
   const uint16_t data_len = 10;  // 2 float * 4 + 2(flags)
   out[0] = SOF;
@@ -89,8 +90,8 @@ inline size_t build_tx_frame(uint8_t * out, uint16_t flags, float pitch, float y
   out[3] = seasky_crc8(out, 3);
   write_le16(out + 4, 0x01);  // cmd_id：视觉→C板。C板接收不校验此值（回传时用 0x02），填 0x01 作标识
   write_le16(out + 6, flags);
-  write_le_float(out + 8, pitch);   // 先 pitch
-  write_le_float(out + 12, yaw);    // 后 yaw
+  write_le_float(out + 8, pitch_rad);   // 先 pitch
+  write_le_float(out + 12, yaw_rad);    // 后 yaw
   write_le16(out + 16, seasky_crc16(out, 16));
   return static_cast<size_t>(data_len + 8);
 }
@@ -133,9 +134,9 @@ public:
         SeaskyRx rx;
         rx.cmd_id = read_le16(&buf_[4]);
         rx.flags = read_le16(&buf_[6]);
-        rx.yaw = read_le_float(&buf_[8]);
-        rx.pitch = read_le_float(&buf_[12]);
-        rx.roll = read_le_float(&buf_[16]);
+        rx.yaw_deg = read_le_float(&buf_[8]);
+        rx.pitch_deg = read_le_float(&buf_[12]);
+        rx.roll_deg = read_le_float(&buf_[16]);
         cb(rx);
       }
 
@@ -163,11 +164,11 @@ public:
     tools::logger()->info("[CommManager] ready.");
   }
 
-  // 发送一帧：flags + 误差角（先 pitch 后 yaw）
-  void send(uint16_t flags, float pitch, float yaw)
+  // 发送一帧：flags + 误差角（先 pitch 后 yaw），角度单位为 rad。
+  void send(uint16_t flags, float pitch_rad, float yaw_rad)
   {
     uint8_t buf[18];
-    size_t n = build_tx_frame(buf, flags, pitch, yaw);
+    size_t n = build_tx_frame(buf, flags, pitch_rad, yaw_rad);
     uart_.write(buf, n);
   }
 
