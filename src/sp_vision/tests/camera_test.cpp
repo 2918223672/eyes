@@ -35,13 +35,19 @@ int main(int argc, char * argv[])
   cv::Mat img;
   std::chrono::steady_clock::time_point timestamp;
 
-  io::CommManager comm("/dev/ttyUSB0", 115200);
+  io::CommManager comm("/dev/ttyUSB0", 921600);
 
   while (!exiter.exit()) {
-    if (comm.receivePacket()) {
-      Eigen::Quaterniond q = comm.getQuaternion();
-      solver.set_R_gimbal2world(q);
+    io::SeaskyRx rx;
+    Eigen::Vector3d gimbal_pos(0, 0, 0);  // [yaw, pitch, roll]
+    if (comm.receive(rx)) {
+      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
     }
+    Eigen::Quaterniond q =
+      Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
+    solver.set_R_gimbal2world(q);
 
     camera.read(img, timestamp);
     auto armors = yolo.detect(img);
@@ -54,9 +60,14 @@ int main(int argc, char * argv[])
       double pitch = armor.ypr_in_world[1] * 180.0 / CV_PI;
       double real_dist = armor.ypd_in_world[2];
       bool should_shoot = (real_dist < 0.5);
-      comm.sendPacket(yaw, pitch, 1, should_shoot);
+      io::FireMode fire_mode = should_shoot ? io::FireMode::AUTO_FIRE : io::FireMode::AUTO_AIM;
+      uint16_t flags = io::pack_tx_flags(fire_mode, io::TargetState::READY_TO_FIRE, io::TargetType::NONE);
+      float error_pitch = static_cast<float>(pitch - gimbal_pos[1]);
+      float error_yaw = static_cast<float>(yaw - gimbal_pos[0]);
+      comm.send(flags, error_pitch, error_yaw);
     } else {
-      comm.sendPacket(0, 0, 0, false);
+      uint16_t flags = io::pack_tx_flags(io::FireMode::NO_FIRE, io::TargetState::NO_TARGET, io::TargetType::NONE);
+      comm.send(flags, 0.0f, 0.0f);
     }
 
     for (const auto & armor : armors) {

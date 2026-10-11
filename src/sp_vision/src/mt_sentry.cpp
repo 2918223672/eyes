@@ -44,7 +44,7 @@ int main(int argc, char * argv[])
 
   // ===== 硬件初始化 =====
   io::Camera camera(config_path);
-  io::CommManager comm("/dev/ttyUSB0", 115200);
+  io::CommManager comm("/dev/ttyUSB0", 921600);
 
   // ===== 算法模块初始化 =====
   auto_aim::multithread::MultiThreadDetector detector(config_path, false);
@@ -73,13 +73,17 @@ int main(int argc, char * argv[])
     auto dt = tools::delta_time(t, last_t);
     last_t = t;
 
-    // 2. 读 IMU 姿态
-    Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
-    if (comm.receivePacket()) {
-      q = comm.getQuaternion();
+    // 2. 读 C板 回传姿态 [yaw, pitch, roll]
+    io::SeaskyRx rx;
+    Eigen::Vector3d gimbal_pos(0, 0, 0);
+    if (comm.receive(rx)) {
+      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
     }
+    Eigen::Quaterniond q =
+      Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
     solver.set_R_gimbal2world(q);
-    Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
 
     // 3. 多目标跟踪 + 瞄准
     auto targets = tracker.track(armors, t);
@@ -92,8 +96,16 @@ int main(int argc, char * argv[])
     // 4. 射击许可
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
 
-    // 5. 发送指令
-    comm.sendPacket(command.yaw, command.pitch, command.control, command.shoot);
+    // 5. 打包 flags + 误差角发送（误差角 = 目标角 − 当前云台角）
+    io::FireMode fire_mode = io::FireMode::NO_FIRE;
+    if (command.control) fire_mode = command.shoot ? io::FireMode::AUTO_FIRE : io::FireMode::AUTO_AIM;
+    io::TargetState target_state = io::TargetState::NO_TARGET;
+    if (tracker.state() == "tracking") target_state = io::TargetState::READY_TO_FIRE;
+    else if (tracker.state() == "deciding") target_state = io::TargetState::TARGET_CONVERGING;
+    uint16_t flags = io::pack_tx_flags(fire_mode, target_state, io::TargetType::NONE);
+    float error_pitch = static_cast<float>(command.pitch - gimbal_pos[1]);
+    float error_yaw = static_cast<float>(command.yaw - gimbal_pos[0]);
+    comm.send(flags, error_pitch, error_yaw);
 
     // ===== 调试显示 =====
     if (!display) continue;

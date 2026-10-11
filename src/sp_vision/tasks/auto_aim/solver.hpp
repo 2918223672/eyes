@@ -18,6 +18,11 @@ public:
 
   void set_R_gimbal2world(const Eigen::Quaterniond & q);
 
+  // 手调装配误差用：读当前相机→云台旋转，或整体覆盖（qd_vision 按键调整）
+  Eigen::Matrix3d R_camera2gimbal() const { return R_camera2gimbal_; }
+
+  void set_R_camera2gimbal(const Eigen::Matrix3d & R) { R_camera2gimbal_ = R; }
+
   void solve(Armor & armor) const;
 
   std::vector<cv::Point2f> reproject_armor(

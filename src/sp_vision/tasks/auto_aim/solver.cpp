@@ -36,6 +36,22 @@ Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3
   R_camera2gimbal_ = Eigen::Matrix<double, 3, 3, Eigen::RowMajor>(R_camera2gimbal_data.data());
   t_camera2gimbal_ = Eigen::Matrix<double, 3, 1>(t_camera2gimbal_data.data());
 
+  // 装配误差补偿：在标定结果之上叠加一个可手调的小角度（单位弧度）。
+  // R_camera2gimbal 那 9 个数无法手动修改（改一个元素会破坏正交性，
+  // 后续变换会静默算错），因此用欧拉角形式的偏置量叠加。
+  // 该项缺省或全为 0 时，行为与叠加前完全一致。
+  if (yaml["camera2gimbal_offset"]) {
+    auto off = yaml["camera2gimbal_offset"];
+    Eigen::Vector3d ypr(
+      off["yaw"].as<double>(0.0), off["pitch"].as<double>(0.0), off["roll"].as<double>(0.0));
+    if (!ypr.isZero()) {
+      R_camera2gimbal_ = tools::rotation_matrix(ypr) * R_camera2gimbal_;
+      tools::logger()->info(
+        "[Solver] camera2gimbal_offset applied: yaw={:.5f} pitch={:.5f} roll={:.5f} rad", ypr[0],
+        ypr[1], ypr[2]);
+    }
+  }
+
   auto camera_matrix_data = yaml["camera_matrix"].as<std::vector<double>>();
   auto distort_coeffs_data = yaml["distort_coeffs"].as<std::vector<double>>();
   Eigen::Matrix<double, 3, 3, Eigen::RowMajor> camera_matrix(camera_matrix_data.data());

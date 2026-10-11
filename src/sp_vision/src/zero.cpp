@@ -96,14 +96,15 @@ int main(int argc, char * argv[])
   cv::Mat img;
   std::chrono::steady_clock::time_point timestamp;
 
-  io::CommManager comm("/dev/ttyUSB0", 115200);
+  io::CommManager comm("/dev/ttyUSB0", 921600);
 
   while (!exiter.exit()) {
 
-    // 读 IMU 姿态
-    if (comm.receivePacket()) {
-      Eigen::Quaterniond q = comm.getQuaternion();
-      (void)q;  // 当前未使用，后续可传入 solver
+    // 读 C板 回传姿态 [yaw, pitch, roll]
+    io::SeaskyRx rx;
+    Eigen::Vector3d gimbal_pos(0, 0, 0);
+    if (comm.receive(rx)) {
+      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
     }
 
     // 从相机读取一帧图像
@@ -115,9 +116,14 @@ int main(int argc, char * argv[])
       res = solve_pose(armors.front().points);
       double real_dist = std::sqrt(res.x * res.x + res.y * res.y + res.z * res.z);
       bool should_shoot = (real_dist < 0.5);
-      comm.sendPacket(res.yaw, res.pitch, 1, should_shoot);
+      io::FireMode fire_mode = should_shoot ? io::FireMode::AUTO_FIRE : io::FireMode::AUTO_AIM;
+      uint16_t flags = io::pack_tx_flags(fire_mode, io::TargetState::READY_TO_FIRE, io::TargetType::NONE);
+      float error_pitch = static_cast<float>(res.pitch - gimbal_pos[1]);
+      float error_yaw = static_cast<float>(res.yaw - gimbal_pos[0]);
+      comm.send(flags, error_pitch, error_yaw);
     } else {
-      comm.sendPacket(0, 0, 0, false);
+      uint16_t flags = io::pack_tx_flags(io::FireMode::NO_FIRE, io::TargetState::NO_TARGET, io::TargetType::NONE);
+      comm.send(flags, 0.0f, 0.0f);
     }
 
     // 调试显示

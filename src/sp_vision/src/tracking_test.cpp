@@ -40,7 +40,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
 
   io::Camera camera(config_path);
-  io::CommManager comm("/dev/ttyUSB0", 115200);
+  io::CommManager comm("/dev/ttyUSB0", 921600);
   auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
@@ -56,11 +56,17 @@ int main(int argc, char * argv[])
     auto dt = tools::delta_time(timestamp, last_t);
     last_t = timestamp;
 
-    // IMU 姿态
-    Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
-    if (comm.receivePacket()) q = comm.getQuaternion();
+    // 读 C板 回传姿态 [yaw, pitch, roll]
+    io::SeaskyRx rx;
+    Eigen::Vector3d gimbal_pos(0, 0, 0);
+    if (comm.receive(rx)) {
+      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
+    }
+    Eigen::Quaterniond q =
+      Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
     solver.set_R_gimbal2world(q);
-    Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
 
     // 检测 + 跟踪
     auto armors = yolo.detect(img);

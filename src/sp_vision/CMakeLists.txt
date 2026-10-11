@@ -12,6 +12,7 @@ find_package(ament_cmake REQUIRED)  # ROS2 构建系统（colcon/ament）
 find_package(sp_msgs REQUIRED)      # 自定义消息包（AutoaimTargetMsg 等）
 find_package(rclcpp REQUIRED)       # ROS2 C++ 客户端（Node, Publisher, Subscriber）
 find_package(std_msgs REQUIRED)     # ROS2 标准消息（String 等）
+find_package(geometry_msgs REQUIRED)# ROS2 几何消息（Vector3 等，serial_debug 发布用）
 
 # --- 第三方 C++ 库 ---
 find_package(Eigen3 REQUIRED)       # 线性代数（矩阵乘法、SVD、四元数）
@@ -48,6 +49,9 @@ add_executable(tracking_test src/tracking_test.cpp)
 target_link_libraries(tracking_test tools io auto_aim)
 target_link_libraries(mt_sentry tools io auto_aim)
 
+add_executable(qd_vision src/qd_vision.cpp)
+target_link_libraries(qd_vision tools io auto_aim)
+
 # --- 硬件驱动测试 ---
 add_executable(cboard_test tests/cboard_test.cpp)
 target_link_libraries(cboard_test tools io)
@@ -60,12 +64,6 @@ target_link_libraries(gimbal_test tools io)
 
 add_executable(gimbal_response_test tests/gimbal_response_test.cpp)
 target_link_libraries(gimbal_response_test tools io)
-
-add_executable(usbcamera_test tests/usbcamera_test.cpp)
-target_link_libraries(usbcamera_test tools io)
-
-add_executable(multi_usbcamera_test tests/multi_usbcamera_test.cpp)
-target_link_libraries(multi_usbcamera_test tools io)
 
 # --- 算法模块测试 ---
 add_executable(auto_aim_test tests/auto_aim_test.cpp)
@@ -98,9 +96,6 @@ target_link_libraries(camera_detect_test tools io auto_aim)
 
 add_executable(camera_thread_test tests/camera_thread_test.cpp)
 target_link_libraries(camera_thread_test tools io auto_aim)
-
-add_executable(usbcamera_detect_test tests/usbcamera_detect_test.cpp)
-target_link_libraries(usbcamera_detect_test tools io auto_aim)
 
 add_executable(publish_test tests/publish_test.cpp)
 target_link_libraries(publish_test tools io)

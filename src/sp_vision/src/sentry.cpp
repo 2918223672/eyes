@@ -14,6 +14,7 @@
 
 #include "io/camera.hpp"
 #include "io/my_comm_manager.hpp"
+#include "io/my_protocol.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -24,6 +25,9 @@
 #include "tools/utils/logger.hpp"
 #include "tools/math/math_tools.hpp"
 #include "tools/plotter.hpp"
+
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/vector3.hpp>// 使用简单的三维向量承载 pitch/yaw/speed
 
 const std::string keys =
   "{help h usage ? |                     | 输出命令行参数说明}"
@@ -45,7 +49,7 @@ int main(int argc, char * argv[])
 
   // ===== 硬件初始化 =====
   io::Camera camera(config_path);
-  io::CommManager comm("/dev/ttyUSB0", 115200);
+  io::CommManager comm("/dev/ttyUSB0", 921600);
 
   // ===== 算法模块初始化 =====
   auto_aim::YOLO yolo(config_path, false);
@@ -63,6 +67,12 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point timestamp;
   auto last_t = std::chrono::steady_clock::now();
 
+  rclcpp::init(argc, argv);
+    auto node = std::make_shared<rclcpp::Node>("sentry_debug_node");
+
+    // 2. 创建一个发布话题，命名为 /serial_debug
+    auto debug_pub = node->create_publisher<geometry_msgs::msg::Vector3>("/serial_debug", 10);
+
   // ===== 主循环 =====
   while (!exiter.exit()) {
 
@@ -71,13 +81,27 @@ int main(int argc, char * argv[])
     auto dt = tools::delta_time(timestamp, last_t);
     last_t = timestamp;
 
-    // 2. 读 IMU 姿态
-    Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
-    if (comm.receivePacket()) {
-      q = comm.getQuaternion();
+    // 2. 读 C板 回传姿态（回环测试时 yaw/pitch 是回显；真实接入后是云台 IMU 角）
+    io::SeaskyRx rx{};
+    Eigen::Vector3d gimbal_pos(0, 0, 0);  // [yaw, pitch, roll]
+    if (comm.receive(rx)) {
+      gimbal_pos = Eigen::Vector3d(rx.yaw, rx.pitch, rx.roll);
     }
+
+    geometry_msgs::msg::Vector3 debug_msg;
+    debug_msg.x = rx.pitch;  // 对应 x 轴数据
+    debug_msg.y = rx.yaw;    // 对应 y 轴数据
+    debug_msg.z = 0.0;                 // 可填弹速或其它数据
+    debug_pub->publish(debug_msg);
+    rclcpp::spin_some(node);
+
+
+    // 由欧拉角重建云台旋转（ZYX 约定，需与 C板 IMU 姿态定义对齐）
+    Eigen::Quaterniond q =
+      Eigen::AngleAxisd(gimbal_pos[0], Eigen::Vector3d::UnitZ()) *
+      Eigen::AngleAxisd(gimbal_pos[1], Eigen::Vector3d::UnitY()) *
+      Eigen::AngleAxisd(gimbal_pos[2], Eigen::Vector3d::UnitX());
     solver.set_R_gimbal2world(q);
-    Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
 
     // 3. 检测 + 过滤 + 排序
     auto armors = yolo.detect(img);
@@ -99,6 +123,17 @@ int main(int argc, char * argv[])
     // 4. 多目标跟踪
     auto targets = tracker.track(armors, timestamp);
 
+    if (!targets.empty()) {
+      const auto & target = targets.front();
+      // EKF 状态向量布局（见 target.cpp:34）:
+      //   x[0]=xc  x[1]=vx  x[2]=yc  x[3]=vy  x[4]=zc  x[5]=vz
+      //   x[6]=yaw x[7]=vyaw x[8]=r  x[9]=?   x[10]=h
+      auto x = target.ekf_x();
+      tools::logger()->info(
+        "[EKF State] {} | yaw: {:.2f} rad | center: [{:.2f}, {:.2f}, {:.2f}]",
+        tracker.state(), x[6], x[0], x[2], x[4]);
+    }
+
     // 5. 瞄准决策
     io::Command command{false, false, 0, 0};
 
@@ -109,8 +144,21 @@ int main(int argc, char * argv[])
     // 6. 射击许可
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
 
-    // 7. 发送指令
-    comm.sendPacket(command.yaw, command.pitch, command.control, command.shoot);
+    // 7. 打包 flags + 误差角发送（误差角 = 目标角 − 当前云台角）
+    io::FireMode fire_mode = io::FireMode::NO_FIRE;
+    if (command.control) fire_mode = command.shoot ? io::FireMode::AUTO_FIRE : io::FireMode::AUTO_AIM;
+
+    io::TargetState target_state = io::TargetState::NO_TARGET;
+    if (tracker.state() == "tracking") target_state = io::TargetState::READY_TO_FIRE;
+    else if (tracker.state() == "deciding") target_state = io::TargetState::TARGET_CONVERGING;
+
+    // TODO: 目标类型映射（YOLO 类别 → C板 TargetType）。C板 flags 仍未解码，先发 NONE
+    io::TargetType target_type = io::TargetType::NONE;
+
+    uint16_t flags = io::pack_tx_flags(fire_mode, target_state, target_type);
+    float error_pitch = static_cast<float>(command.pitch - gimbal_pos[1]);
+    float error_yaw = static_cast<float>(command.yaw - gimbal_pos[0]);
+    comm.send(flags, error_pitch, error_yaw);
 
     // ===== 调试显示 =====
     if (!display) continue;
@@ -124,7 +172,6 @@ int main(int argc, char * argv[])
     // 跟踪状态（左上角） lost/deciding/tracking + 帧率 丢失/决策/跟踪中
     tools::draw_text(img, fmt::format("[{}] ", tracker.state()), {10, 30});
     tools::logger()->info("[{}] FPS: {:.1f}", tracker.state(), 1 / dt);
-
     // EKF 重投影（绿点）+ 瞄准点（红/蓝）
     if (!targets.empty()) {
       auto target = targets.front();
@@ -132,7 +179,7 @@ int main(int argc, char * argv[])
       // 跟踪器认为装甲板在哪 → 绿点
       for (const auto & xyza : target.armor_xyza_list()) {
         auto pts = solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
-        tools::draw_points(img, pts, {0, 255, 0});
+        tools::draw_points(img, pts, {0, 0, 255});
       }
 
       // Aimer 选的瞄准点 → 红（有效）/ 蓝（无效）
@@ -140,16 +187,18 @@ int main(int argc, char * argv[])
       auto aim_pts = solver.reproject_armor(
         aim_point.xyza.head(3), aim_point.xyza[3], target.armor_type, target.name);
       if (aim_point.valid)
-        tools::draw_points(img, aim_pts, {0, 0, 255});
-      else
         tools::draw_points(img, aim_pts, {255, 0, 0});
+      else
+        tools::draw_points(img, aim_pts, {0, 255, 0});
     }
 
     cv::Mat display_img;
     cv::resize(img, display_img, cv::Size(640, 480));
-    cv::imshow("sentry", display_img);
+    cv::imshow("sentry", display_img);   
     if (cv::waitKey(1) == 27) break;
   }
+
+  rclcpp::shutdown();
 
   return 0;
 }
